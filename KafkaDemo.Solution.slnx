@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="KafkaDemo.Api/KafkaDemo.Api.csproj" />
+  <Project Path="KafkaDemo.AppHost/KafkaDemo.AppHost.csproj" />
+  <Project Path="KafkaDemo.ServiceDefaults/KafkaDemo.ServiceDefaults.csproj" />
+</Solution>
