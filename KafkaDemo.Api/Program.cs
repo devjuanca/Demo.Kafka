@@ -1,6 +1,7 @@
 using Confluent.Kafka;
 using EasyServiceRegister;
 using KafkaDemo.Api.Consumers;
+using KafkaDemo.Api.Dtos;
 using KafkaDemo.Api.Persistence;
 using KafkaDemo.Api.Services;
 using KafkaDemo.ServiceDefaults;
@@ -38,9 +39,19 @@ builder.Services.AddHostedService<StoreStockPriceConsumer>();
 
 builder.Services.AddHostedService<AlertStockPriceConsumer>();
 
+builder.Services.AddHostedService<RealtimeStockPriceConsumer>();
+
 builder.AddServiceDefaults();
 
 builder.Services.AddOpenApi();
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("allow-any", policy =>
+    {
+        policy.AllowAnyHeader().AllowAnyMethod().AllowCredentials();
+    });
+});
 
 var app = builder.Build();
 
@@ -61,5 +72,14 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseCors("blazor");
+
+app.MapGet("/stock-prices/live", (EventStreamService<StockPriceChangedEvent> streamService, CancellationToken cancellationToken) =>
+{
+    var streamEvents = streamService.ReadAllAsync(cancellationToken);
+
+    return TypedResults.ServerSentEvents(streamEvents, eventType: "stockPriceChanged");
+});
+
 
 app.Run();

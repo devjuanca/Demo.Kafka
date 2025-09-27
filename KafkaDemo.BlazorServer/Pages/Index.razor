@@ -1,0 +1,117 @@
+@page "/"
+@inject StockPriceStreamService StreamService
+
+<h2>Live Feed</h2>
+<div class="controls">
+    <label>Symbol:
+        <select @onchange="OnSymbolChanged" value="@selectedSymbol">
+            <option value="">(All)</option>
+            @foreach (var sym in symbols)
+            {
+                <option value="@sym">@sym</option>
+            }
+        </select>
+    </label>
+    <button @onclick="ToggleStream">@(isStreaming ? "Stop" : "Start")</button>
+</div>
+
+<div class="prices">
+    @if(prices.Count == 0)
+    {
+        <p class="muted">@(isStreaming ? "Waiting data..." : "Push Start")</p>
+    }
+    else
+    {
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Symbol</th>
+                    <th>Price</th>
+                    <th>Change</th>
+                    <th>%</th>
+                    <th>Time (UTC)</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach(var p in prices.ToArray().Reverse().Take(DisplayCount))
+                {
+                    var cls = p.Change switch { > 0 => "up", < 0 => "down", _ => "flat" };
+                    <tr class="@cls">
+                        <td>@p.Symbol</td>
+                        <td>@p.Price.ToString("F2")</td>
+                        <td>@p.Change.ToString("F2")</td>
+                        <td>@p.ChangePercent.ToString("F2")</td>
+                        <td>@p.UtcTimestamp.ToString("HH:mm:ss")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@code {
+    private readonly Queue<StockPriceChangedEvent> prices = new();
+
+    private const int MaxEvents = 50;
+    
+    private const int DisplayCount = 50;
+
+    private string? selectedSymbol;
+    
+    private bool isStreaming;
+    
+    private readonly HashSet<string> symbols = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Start();
+    }
+
+    private async Task Start()
+    {
+        if (isStreaming) return;
+        isStreaming = true;
+        await StreamService.StartAsync(OnEvent, CancellationToken.None, selectedSymbol);
+    }
+
+    private Task OnEvent(StockPriceChangedEvent evt)
+    {
+        symbols.Add(evt.Symbol);
+
+        if (string.IsNullOrEmpty(selectedSymbol) || evt.Symbol == selectedSymbol)
+        {
+            prices.Enqueue(evt);
+
+            if (prices.Count > MaxEvents)
+            {
+                prices.Dequeue();
+            }
+            InvokeAsync(StateHasChanged);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task ToggleStream()
+    {
+        if (isStreaming)
+        {
+            await StreamService.StopAsync();
+            isStreaming = false;
+        }
+        else
+        {
+            prices.Clear();
+            await Start();
+        }
+    }
+
+    private async Task OnSymbolChanged(ChangeEventArgs e)
+    {
+        selectedSymbol = e.Value?.ToString();
+
+        prices.Clear();
+        
+        await StreamService.RestartAsync(OnEvent, CancellationToken.None, selectedSymbol);
+    }
+}

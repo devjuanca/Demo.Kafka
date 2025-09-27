@@ -67,6 +67,7 @@ public sealed class StockPriceService(KafkaProducer producer, ILogger<StockPrice
                 current[stock.Symbol] = newPrice;
 
                 var change = newPrice - oldPrice;
+
                 var changePct = oldPrice == 0 ? 0 : change / oldPrice * 100m;
 
                 var evt = new StockPriceChangedEvent(

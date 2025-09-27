@@ -15,15 +15,22 @@ public class AlertStockPriceConsumer(
     {
         using var context = await contextFactory.CreateDbContextAsync(ct);
 
-        var latestPrice = await context.StockPrices
+        var changePercent = await context.StockPrices
             .Where(s => s.Symbol == evt.Symbol)
             .OrderByDescending(s => s.UtcTimestamp)
-            .Select(s => s.Price)
+            .Select(s => s.ChangePercent)
             .FirstOrDefaultAsync(ct);
 
-        if (latestPrice != 0 && Math.Abs((evt.Price - latestPrice) / latestPrice) >= 0.05m) // If price changed by 5% or more
+        if (Math.Abs(changePercent) >= 0.05m)
         {
-            logger.LogWarning("Significant price change detected for {Symbol}: {OldPrice} -> {NewPrice} ({ChangePct}%)", evt.Symbol, latestPrice, evt.Price, evt.ChangePercent);
+            var direction = changePercent > 0 ? "up" : "down";
+
+            logger.LogWarning(
+                "Significant price move {Direction} for {Symbol}: change {ChangePct}% (current price {CurrentPrice})",
+                direction,
+                evt.Symbol,
+                changePercent,
+                evt.Price);
         }
         
     }

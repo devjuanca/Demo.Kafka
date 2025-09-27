@@ -1,0 +1,10 @@
+.controls { display:flex; gap:1rem; align-items:center; margin-bottom:1rem; }
+.controls select, .controls button { padding:.5rem .75rem; font-size:14px; }
+.table { width:100%; border-collapse:collapse; font-size:14px; }
+.table th { text-align:left; background:#f1f5f9; position:sticky; top:0; }
+.table td, .table th { padding:.4rem .5rem; border-bottom:1px solid #e2e8f0; }
+.up { background:rgba(16,185,129,0.08); color:#065f46; }
+.down { background:rgba(239,68,68,0.08); color:#7f1d1d; }
+.flat { }
+.muted { color:#64748b; }
+body { margin:0; }
