@@ -1,7 +1,4 @@
-﻿using KafkaDemo.Api.Dtos;
-using KafkaDemo.Api.Services;
-
-namespace KafkaDemo.Api.Consumers;
+﻿namespace KafkaDemo.Api.Consumers;
 
 public class RealtimeStockPriceConsumer(
     IConfiguration configuration,

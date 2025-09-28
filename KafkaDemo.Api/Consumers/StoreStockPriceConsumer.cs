@@ -1,15 +1,11 @@
-﻿using KafkaDemo.Api.Dtos;
-using KafkaDemo.Api.Entities;
-using KafkaDemo.Api.Persistence;
-using KafkaDemo.Api.Services;
-using Microsoft.EntityFrameworkCore;
+﻿using KafkaDemo.Api.Entities;
 
 namespace KafkaDemo.Api.Consumers;
 
 public class StoreStockPriceConsumer(
-    IDbContextFactory<StocksDbContext> contextFactory, 
-    ILogger<StoreStockPriceConsumer> logger, 
-    IConfiguration configuration, 
+    IDbContextFactory<StocksDbContext> contextFactory,
+    ILogger<StoreStockPriceConsumer> logger,
+    IConfiguration configuration,
     KafkaProducer kafkaProducer) : KafkaConsumerBase<StockPriceChangedEvent>("store-stock-price-group", "stock-prices", configuration)
 {
     protected override async Task HandleMessageAsync(StockPriceChangedEvent evt, CancellationToken ct)
@@ -36,6 +32,12 @@ public class StoreStockPriceConsumer(
     {
         logger.LogError(ex, "Error consuming stock price event");
 
-        await kafkaProducer.ProduceAsync("stock-prices-error", evt?.Symbol ?? "unknown", new { Consumer = nameof(StoreStockPriceConsumer), Error = ex.Message, Event = evt }, ct);
+        var errorDto = new StockPriceErrorDto
+        {
+            Consumer = nameof(StoreStockPriceConsumer),
+            Error = ex.Message,
+            Event = evt
+        };
+        await kafkaProducer.ProduceAsync("stock-prices-error", evt?.Symbol ?? "unknown", errorDto, ct);
     }
 }

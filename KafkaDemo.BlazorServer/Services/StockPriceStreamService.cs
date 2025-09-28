@@ -10,13 +10,7 @@ public sealed class StockPriceStreamService(IHttpClientFactory httpClientFactory
 
     private Task? _readerTask;
 
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        PropertyNameCaseInsensitive = true,
-        Converters = { new JsonStringEnumConverter() }
-    };
-
-    public async Task StartAsync(Func<StockPriceChangedEvent, Task> onEvent, CancellationToken ct, string? filterSymbol = null)
+    public async Task StartAsync(Func<StockPriceChangedEvent, Task> onEvent, string? filterSymbol = null, CancellationToken ct = default)
     {
         _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
@@ -38,7 +32,6 @@ public sealed class StockPriceStreamService(IHttpClientFactory httpClientFactory
 
                 using var reader = new StreamReader(stream);
 
-                // Replace the while loop condition to avoid using reader.EndOfStream in an async method
                 while (!token.IsCancellationRequested)
                 {
                     var line = await reader.ReadLineAsync();
@@ -60,9 +53,13 @@ public sealed class StockPriceStreamService(IHttpClientFactory httpClientFactory
 
                         if (json.Length == 0) continue;
 
-                        var evt = JsonSerializer.Deserialize<StockPriceChangedEvent>(json, JsonOptions);
+                        var evt = JsonSerializer.Deserialize<StockPriceChangedEvent>(json, JsonSerializerOptions.Web);
 
-                        if (evt is null) continue;
+                        if (evt is null)
+                        {
+                            continue;
+                        }
+
 
                         if (filterSymbol == null || evt.Symbol == filterSymbol)
                         {
@@ -82,20 +79,26 @@ public sealed class StockPriceStreamService(IHttpClientFactory httpClientFactory
 
     public async Task StopAsync()
     {
-        try { _cts?.Cancel(); } catch {}
+        try 
+        { 
+            _cts?.Cancel(); 
+        } 
+        catch { }
+
         if (_readerTask is not null)
         {
             try { await _readerTask; } catch { }
         }
         _cts?.Dispose();
+
         _cts = null;
     }
 
-    public async Task RestartAsync(Func<StockPriceChangedEvent, Task> onEvent, CancellationToken ct, string? filterSymbol)
+    public async Task RestartAsync(Func<StockPriceChangedEvent, Task> onEvent, string? filterSymbol, CancellationToken ct)
     {
         await StopAsync();
 
-        await StartAsync(onEvent, ct, filterSymbol);
+        await StartAsync(onEvent, filterSymbol, ct);
     }
 }
 

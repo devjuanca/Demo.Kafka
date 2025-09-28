@@ -1,5 +1,4 @@
 using KafkaDemo.Api.Entities;
-using Microsoft.EntityFrameworkCore;
 
 namespace KafkaDemo.Api.Persistence;
 

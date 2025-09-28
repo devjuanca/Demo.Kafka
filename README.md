@@ -5,13 +5,14 @@ Demo .NET 10 Aspire solution showing Kafka + PostgreSQL + real‑time streaming.
 ## Projects
 - `KafkaDemo.AppHost`: Aspire AppHost wiring infrastructure (Kafka broker, Postgres, services) and lifecycle.
 - `KafkaDemo.Api`: Minimal API producing & consuming Kafka messages, EF Core (PostgreSQL) persistence, SSE endpoint `/stock-prices/live`.
-  - Producers: publishes stock price change events (`IProducer<string,string>` via Confluent.Kafka)
+  - Producers: publishes stock price change events (via HTTP call to StockFakeApi, then Kafka)
   - Consumers: 
     - `StoreStockPriceConsumer`: persists prices
     - `AlertStockPriceConsumer`: (alerts logic placeholder if present)
     - `RealtimeStockPriceConsumer`: pushes events into in‑memory stream for Server Sent Events
 - `KafkaDemo.BlazorServer`: Simple UI (server) consuming the API/SSE.
 - `KafkaDemo.ServiceDefaults`: Cross‑cutting defaults (OpenTelemetry, health, service discovery, resilience).
+- `KafkaDemo.StockFakeApi`: Minimal API that simulates and exposes fake stock prices at `/stocks` (used by KafkaDemo.Api as data source).
 
 ## Main Concepts
 - Kafka topics (e.g. `stock-prices`) for stock price changed events.
@@ -29,6 +30,7 @@ Prereqs: .NET 10 SDK preview, Docker (for Kafka + Postgres via Aspire), optional
    ```
 2. API will expose health at `/health` and SSE at `/stock-prices/live`.
 3. Browse Blazor UI (see AppHost console for URL) to watch live prices.
+4. The StockFakeApi exposes `/stocks` endpoint with simulated stock prices (used by KafkaDemo.Api).
 
 ## Sample SSE Test
 ```bash

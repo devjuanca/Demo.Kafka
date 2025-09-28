@@ -69,9 +69,12 @@
 
     private async Task Start()
     {
-        if (isStreaming) return;
+        if (isStreaming) 
+            return;
+
         isStreaming = true;
-        await StreamService.StartAsync(OnEvent, CancellationToken.None, selectedSymbol);
+
+        await StreamService.StartAsync(OnEvent, selectedSymbol, CancellationToken.None);
     }
 
     private Task OnEvent(StockPriceChangedEvent evt)
@@ -97,11 +100,13 @@
         if (isStreaming)
         {
             await StreamService.StopAsync();
+
             isStreaming = false;
         }
         else
         {
             prices.Clear();
+
             await Start();
         }
     }
@@ -112,6 +117,6 @@
 
         prices.Clear();
         
-        await StreamService.RestartAsync(OnEvent, CancellationToken.None, selectedSymbol);
+        await StreamService.RestartAsync(OnEvent, selectedSymbol, CancellationToken.None);
     }
 }

@@ -19,6 +19,7 @@
   <ItemGroup>
     <ProjectReference Include="..\KafkaDemo.Api\KafkaDemo.Api.csproj" />
     <ProjectReference Include="..\KafkaDemo.BlazorServer\KafkaDemo.BlazorServer.csproj" />
+    <ProjectReference Include="..\KafkaDemo.StockFakeApi\KafkaDemo.StockFakeApi.csproj" />
   </ItemGroup>
 
 </Project>

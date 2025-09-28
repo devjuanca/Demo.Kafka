@@ -6,4 +6,5 @@
   <Project Path="KafkaDemo.AppHost/KafkaDemo.AppHost.csproj" />
   <Project Path="KafkaDemo.BlazorServer/KafkaDemo.BlazorServer.csproj" />
   <Project Path="KafkaDemo.ServiceDefaults/KafkaDemo.ServiceDefaults.csproj" />
+  <Project Path="KafkaDemo.StockFakeApi/KafkaDemo.StockFakeApi.csproj" />
 </Solution>

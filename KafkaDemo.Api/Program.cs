@@ -1,12 +1,3 @@
-using Confluent.Kafka;
-using EasyServiceRegister;
-using KafkaDemo.Api.Consumers;
-using KafkaDemo.Api.Dtos;
-using KafkaDemo.Api.Persistence;
-using KafkaDemo.Api.Services;
-using KafkaDemo.ServiceDefaults;
-using Microsoft.EntityFrameworkCore;
-
 var builder = WebApplication.CreateBuilder(args);
 
 var (configuration, environment) = (builder.Configuration, builder.Environment);
@@ -23,14 +14,14 @@ builder.Services.AddDbContextFactory<StocksDbContext>(options =>
     });
 });
 
-builder.Services.AddSingleton<IProducer<string, string>>(_ =>
+builder.Services.AddSingleton(_ =>
 {
     var producerConfig = new ProducerConfig
     {
         BootstrapServers = configuration.GetConnectionString("kafka")
     };
 
-    return new ProducerBuilder<string, string>(producerConfig).Build();
+    return new ProducerBuilder<string, byte[]>(producerConfig).Build();
 });
 
 builder.Services.AddHostedService<StockPriceService>();
@@ -45,12 +36,9 @@ builder.AddServiceDefaults();
 
 builder.Services.AddOpenApi();
 
-builder.Services.AddCors(options =>
+builder.Services.AddHttpClient("StockApi", client =>
 {
-    options.AddPolicy("allow-any", policy =>
-    {
-        policy.AllowAnyHeader().AllowAnyMethod().AllowCredentials();
-    });
+    client.BaseAddress = new Uri("http+https://stockapi");
 });
 
 var app = builder.Build();
@@ -72,7 +60,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
-app.UseCors("blazor");
+
 
 app.MapGet("/stock-prices/live", (EventStreamService<StockPriceChangedEvent> streamService, CancellationToken cancellationToken) =>
 {
@@ -80,6 +68,5 @@ app.MapGet("/stock-prices/live", (EventStreamService<StockPriceChangedEvent> str
 
     return TypedResults.ServerSentEvents(streamEvents, eventType: "stockPriceChanged");
 });
-
 
 app.Run();
