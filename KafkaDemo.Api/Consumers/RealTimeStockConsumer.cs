@@ -1,10 +1,12 @@
 ﻿namespace KafkaDemo.Api.Consumers;
 
-public class RealtimeStockPriceConsumer(
-    IConfiguration configuration,
-    ILogger<RealtimeStockPriceConsumer> logger,
+public class RealtimeStockPriceConsumer(IConfiguration configuration, ILogger<RealtimeStockPriceConsumer> logger,
     EventStreamService<StockPriceChangedEvent> streamService)
-    : KafkaConsumerBase<StockPriceChangedEvent>("realtime-stock-group", "stock-prices", configuration)
+    : KafkaConsumerBase<StockPriceChangedEvent>(
+        groupId:"realtime-stock-group", 
+        topic:"stock-prices",
+        connectionString: configuration.GetConnectionString("kafka") ?? "", 
+        logger: logger)
 {
     protected override async Task HandleMessageAsync(StockPriceChangedEvent evt, CancellationToken ct)
     {

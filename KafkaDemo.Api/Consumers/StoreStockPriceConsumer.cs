@@ -2,11 +2,12 @@
 
 namespace KafkaDemo.Api.Consumers;
 
-public class StoreStockPriceConsumer(
-    IDbContextFactory<StocksDbContext> contextFactory,
-    ILogger<StoreStockPriceConsumer> logger,
-    IConfiguration configuration,
-    KafkaProducer kafkaProducer) : KafkaConsumerBase<StockPriceChangedEvent>("store-stock-price-group", "stock-prices", configuration)
+public class StoreStockPriceConsumer(IDbContextFactory<StocksDbContext> contextFactory, ILogger<StoreStockPriceConsumer> logger, IConfiguration configuration,
+    KafkaProducer kafkaProducer) : KafkaConsumerBase<StockPriceChangedEvent>(
+        groupId: "store-stock-price-group", 
+        topic:"stock-prices", 
+        connectionString: configuration.GetConnectionString("kafka") ?? "", 
+        logger: logger)
 {
     protected override async Task HandleMessageAsync(StockPriceChangedEvent evt, CancellationToken ct)
     {

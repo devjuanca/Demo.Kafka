@@ -1,112 +1,51 @@
 ﻿using System.Collections.Concurrent;
 using System.Text.Json;
-using System.Threading.Channels;
 
 namespace KafkaDemo.Api.Consumers;
 
 public abstract class KafkaConsumerBase<TEvent>(
     string groupId,
     string topic,
-    IConfiguration configuration,
+    string connectionString,
+    ILogger<KafkaConsumerBase<TEvent>> logger,
+
     int maxParallelism = 1,
-    int commitIntervalMs = 1000,
-    int commitMessageBatchSize = 50) : BackgroundService where TEvent : class
+    int commitEvery = 10,              // commit every N messages
+    TimeSpan? commitInterval = null    // or every some time
+) : BackgroundService where TEvent : class
 {
     private readonly ConsumerConfig _config = new()
     {
-        BootstrapServers = configuration.GetConnectionString("kafka"),
+        BootstrapServers = connectionString,
         GroupId = groupId,
         AutoOffsetReset = AutoOffsetReset.Earliest,
-        EnableAutoCommit = false,
-        EnableAutoOffsetStore = false
+        EnableAutoCommit = false, // we do it manually
+        EnableAutoOffsetStore = false // we do it manually
     };
 
-    protected abstract Task HandleMessageAsync(TEvent evt, CancellationToken ct);
+    private readonly TimeSpan _commitInterval = commitInterval ?? TimeSpan.FromSeconds(5);
 
-    protected abstract Task HandleErrorAsync(TEvent? evt, Exception ex, CancellationToken ct);
+    private readonly ConcurrentBag<Task> _runningTasks = [];
+
+    private int _processedSinceCommit = 0;
+
+    private DateTime _lastCommitTime = DateTime.UtcNow;
+
+    protected abstract Task HandleMessageAsync(TEvent @event, CancellationToken cancellationToken);
+
+    protected abstract Task HandleErrorAsync(TEvent? evt, Exception ex, CancellationToken cancellationToken);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var consumer = new ConsumerBuilder<string, byte[]>(_config).Build();
+        using var consumer = new ConsumerBuilder<Ignore, string>(_config).Build();
 
         consumer.Subscribe(topic);
-
-        var channel = Channel.CreateBounded<WorkItem>(new BoundedChannelOptions(Math.Max(100, maxParallelism * 20))
-        {
-            FullMode = BoundedChannelFullMode.Wait,
-            SingleReader = false,
-            SingleWriter = true
-        });
-
-        var partitionStates = new ConcurrentDictionary<TopicPartition, PartitionState>();
-        
-        var workers = new List<Task>();
-        
-        var commitInterval = TimeSpan.FromMilliseconds(commitIntervalMs <= 0 ? 1000 : commitIntervalMs);
-        
-        var nextCommitAt = DateTime.UtcNow + commitInterval;
-        
-        var commitNeeded = 0;
-        
-        int processedSinceLastCommit = 0;
-
-        // Start workers (skip if sequential)
-        if (maxParallelism > 1)
-        {
-            for (int i = 0; i < maxParallelism; i++)
-            {
-                workers.Add(Task.Run(async () =>
-                {
-                    var reader = channel.Reader;
-
-                    while (await reader.WaitToReadAsync(stoppingToken))
-                    {
-                        while (reader.TryRead(out var item))
-                        {
-                            var cr = item.Cr;
-                            
-                            TEvent? evt = null;
-                            
-                            try
-                            {
-                                evt = JsonSerializer.Deserialize<TEvent>(cr.Message.Value, JsonSerializerOptions.Web);
-
-                                if (evt is null)
-                                {
-                                    continue; // skip null
-                                }
-
-                                await HandleMessageAsync(evt, stoppingToken);
-
-                                partitionStates
-                                    .GetOrAdd(cr.TopicPartition, _ => new PartitionState())
-                                    .MarkProcessed(cr.Offset);
-
-                                Interlocked.Exchange(ref commitNeeded, 1);
-
-                                Interlocked.Increment(ref processedSinceLastCommit);
-                            }
-                            catch (Exception ex)
-                            {
-                                partitionStates
-                                    .GetOrAdd(cr.TopicPartition, _ => new PartitionState())
-                                    .MarkFailed(cr.Offset);
-
-                                await HandleErrorAsync(evt, ex, stoppingToken);
-
-                                Interlocked.Exchange(ref commitNeeded, 1); // allow commit of previous offsets
-                            }
-                        }
-                    }
-                }, stoppingToken));
-            }
-        }
 
         try
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                ConsumeResult<string, byte[]>? cr = null;
+                ConsumeResult<Ignore, string>? cr;
 
                 try
                 {
@@ -114,172 +53,109 @@ public abstract class KafkaConsumerBase<TEvent>(
                 }
                 catch (ConsumeException ex)
                 {
-                    await HandleErrorAsync(null, ex, stoppingToken);
+                    logger.LogError(ex, "Consume error");
+
                     continue;
                 }
-                if (cr is null)
+
+                if (cr?.Message == null)
                 {
                     continue;
                 }
 
-                if (maxParallelism <= 1)
-                {
-                    // Sequential path
-                    TEvent? evt = null;
+                var evt = JsonSerializer.Deserialize<TEvent>(cr.Message.Value, JsonSerializerOptions.Web);
 
-                    try
+                if (evt == null) continue;
+
+                if (maxParallelism > 1)
+                {
+                    var task = Task.Run(async () =>
                     {
-                        evt = JsonSerializer.Deserialize<TEvent>(cr.Message.Value, JsonSerializerOptions.Web);
-
-                        if (evt is null)
+                        try
                         {
-                            continue;
+                            await HandleMessageAsync(evt, stoppingToken);
+
+                            // Store offset if success
+                            consumer.StoreOffset(cr);
+
+                            IncrementCommit(consumer);
                         }
-                        
-                        await HandleMessageAsync(evt, stoppingToken);
-                        
-                        consumer.Commit(cr); // single-thread commit
-                    }
-                    catch (Exception ex)
-                    {
-                        await HandleErrorAsync(evt, ex, stoppingToken);
-                    }
+                        catch (Exception ex)
+                        {
+                            //No store, the message will process again.
+                            logger.LogError(ex, "Error processing message");
+
+                           await HandleErrorAsync(evt, ex, stoppingToken);
+                        }
+                    }, stoppingToken);
+
+                    _runningTasks.Add(task);
                 }
                 else
                 {
-                    await channel.Writer.WriteAsync(new WorkItem(cr), stoppingToken);
+                    try
+                    {
+                        await HandleMessageAsync(evt, stoppingToken);
+
+                        consumer.StoreOffset(cr);
+
+                        IncrementCommit(consumer);
+                    }
+                    catch (Exception ex)
+                    {
+                        //No store, the message will process again.
+                        logger.LogError(ex, "Error processing message");
+
+                        await HandleErrorAsync(evt, ex, stoppingToken);
+                    }
                 }
 
-                bool intervalElapsed = DateTime.UtcNow >= nextCommitAt;
-                
-                bool batchHit = processedSinceLastCommit >= commitMessageBatchSize;
-
-                if (maxParallelism > 1 &&
-                    (batchHit || intervalElapsed || Interlocked.CompareExchange(ref commitNeeded, 0, 1) == 1))
+                // Clean completed Tasks
+                while (_runningTasks.TryTake(out var finishedTask))
                 {
-                    if (CommitCompletedOffsets(consumer, partitionStates))
+                    if (!finishedTask.IsCompleted)
                     {
-                        processedSinceLastCommit = 0;
+                        _runningTasks.Add(finishedTask); // no completed yet.
                     }
-                    if (intervalElapsed)
-                        nextCommitAt = DateTime.UtcNow + commitInterval;
                 }
             }
-        }
-        catch (OperationCanceledException)
-        {
-            // graceful stop
         }
         finally
         {
-            // Close writer so workers finish
-            channel.Writer.TryComplete();
+            Console.WriteLine("Closing consumer...");
             try
             {
-                if (workers.Count > 0)
-                    await Task.WhenAll(workers);
+                consumer.Commit(); // last commit
             }
-            catch
-            {
-                // swallow worker exceptions (already reported via HandleErrorAsync)
-            }
-
-            CommitCompletedOffsets(consumer, partitionStates, drainAll: false);
+            catch {  }
 
             consumer.Close();
+
+            // wait for pending tasks
+            await Task.WhenAll(_runningTasks);
         }
     }
 
-    private static bool CommitCompletedOffsets(
-        IConsumer<string, byte[]> consumer,
-        ConcurrentDictionary<TopicPartition, PartitionState> partitionStates,
-        bool drainAll = false)
+    private void IncrementCommit(IConsumer<Ignore, string> consumer)
     {
-        var tpos = new List<TopicPartitionOffset>();
+        var count = Interlocked.Increment(ref _processedSinceCommit);
 
-        foreach (var (tp, ps) in partitionStates)
+        var now = DateTime.UtcNow;
+
+        if (count >= commitEvery || now - _lastCommitTime >= _commitInterval)
         {
-            if (ps.TryGetNextCommitOffset(out var offset, drainAll))
+            try
             {
-                tpos.Add(new TopicPartitionOffset(tp, offset + 1));
+                consumer.Commit();
+
+                _processedSinceCommit = 0;
+
+                _lastCommitTime = now;
             }
-        }
-
-        if (tpos.Count == 0)
-        {
-            return false;
-        }
-
-        try
-        {
-            consumer.Commit(tpos);
-        }
-        catch
-        {
-        }
-        return true;
-    }
-
-    private sealed class PartitionState
-    {
-        private readonly SortedDictionary<long, bool> _pending = new();
-        
-        private long _lastCommitted = -1;
-        
-        private readonly object _lock = new();
-
-        public void MarkProcessed(Offset offset)
-        {
-            lock (_lock)
+            catch (KafkaException ex)
             {
-                _pending[(long)offset] = true;
-            }
-        }
-
-        public void MarkFailed(Offset offset)
-        {
-            lock (_lock)
-            {
-                _pending[(long)offset] = false;
-            }
-        }
-
-        public bool TryGetNextCommitOffset(out long commitOffset, bool drainAll)
-        {
-            lock (_lock)
-            {
-                long candidate = _lastCommitted;
-                long probe = candidate + 1;
-                bool advanced = false;
-
-                while (_pending.TryGetValue(probe, out var ok))
-                {
-                    if (!ok)
-                    {
-                        break;
-                    }
-                    candidate = probe;
-                    probe++;
-                    advanced = true;
-                }
-
-                if (!advanced)
-                {
-                    commitOffset = -1;
-                    return false;
-                }
-
-                for (long k = _lastCommitted + 1; k <= candidate; k++)
-                    _pending.Remove(k);
-
-                _lastCommitted = candidate;
-                commitOffset = candidate;
-                return true;
+                logger.LogError(ex, "Commit failed");
             }
         }
     }
-
-    // Work item passed to workers
-    private sealed record WorkItem(ConsumeResult<string, byte[]> Cr);
 }
-
